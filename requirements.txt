@@ -19,3 +19,7 @@ re
 collections
 nltk
 tf.keras
+opencv-python
+sklearn
+deepface
+deepface-cv2

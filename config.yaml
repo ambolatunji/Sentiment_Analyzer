@@ -1,0 +1,70 @@
+# config.yaml
+
+# Model Configuration
+model:
+  name: "resnet50"
+  pretrained: true
+  input_size: [224, 224]
+  normalize:
+    mean: [0.485, 0.456, 0.406]
+    std: [0.229, 0.224, 0.225]
+
+# Face Detection Configuration
+face_detection:
+  scale_factor: 1.1
+  min_neighbors: 5
+  min_size: [30, 30]
+  confidence_threshold: 0.8
+  detection_method: "haar_cascade"
+  draw_color: [255, 0, 0]
+  rectangle_thickness: 2
+
+# Emotion Analysis Configuration
+emotion_analysis:
+  enforce_detection: false
+  actions: ["emotion"]
+  confidence_threshold: 0.5
+  enabled_emotions:
+    - happy
+    - sad
+    - angry
+    - neutral
+    - surprise
+    - fear
+    - disgust
+
+# Cache Configuration
+cache:
+  enabled: true
+  directory: "cache"
+  max_size_mb: 1000
+  expiration_days: 30
+  imagenet_cache_file: "imagenet_classes.json"
+
+# API Configuration
+api:
+  imagenet_url: "https://storage.googleapis.com/download.tensorflow.org/data/imagenet_class_index.json"
+  timeout_seconds: 10
+  max_retries: 3
+  retry_delay_seconds: 1
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "image_analysis.log"
+  max_file_size_mb: 10
+  backup_count: 5
+
+# UI Configuration
+ui:
+  page_title: "Image Analysis App"
+  page_icon: "🖼️"
+  layout: "wide"
+  max_upload_size_mb: 5
+  supported_formats: ["jpg", "png", "jpeg"]
+  display:
+    show_confidence_scores: true
+    show_class_ids: true
+    show_processing_time: true
+    image_quality: 90

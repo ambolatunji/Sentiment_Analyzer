@@ -1,136 +1,82 @@
 import streamlit as st
-import matplotlib.pyplot as plt
-import pandas as pd
-import seaborn as sns
-from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
-from wordcloud import WordCloud
-import emoji
+import cv2
+import numpy as np
+from deepface import DeepFace
+from PIL import Image
 import torch
-import os
-from pathlib import Path
-import logging
-import traceback
-import re
-from collections import defaultdict
-from docx import Document
-import PyPDF2
-import io
-import base64
-import tempfile
-import nltk
-from nltk.sentiment import SentimentIntensityAnalyzer
-from flair.models import TextClassifier
-from flair.data import Sentence
+import torchvision.transforms as transforms
+from torchvision import models
+import matplotlib.pyplot as plt
+import json
+import requests
 
-# Download necessary NLTK data
-nltk.download('vader_lexicon')
+# Load ImageNet class labels
+imagenet_url = "https://storage.googleapis.com/download.tensorflow.org/data/imagenet_class_index.json"
+imagenet_classes = requests.get(imagenet_url).json()
 
-# Initialize NLTK and Flair sentiment analyzers
-sia = SentimentIntensityAnalyzer()
-flair_classifier = TextClassifier.load('en-sentiment')
+def detect_faces(image):
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+    return faces
 
-def setup_logging():
-    logging.basicConfig(level=logging.INFO)
-    return logging.getLogger(__name__)
-
-def initialize_model(model_name, logger, cache_path):
+def analyze_facial_expression(image):
     try:
-        cache_dir = Path(cache_path)
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        
-        logger.info(f"Using cache directory: {cache_dir}")
-        logger.info(f"Attempting to load model: {model_name}")
-        
-        tokenizer = AutoTokenizer.from_pretrained(model_name, cache_dir=cache_dir)
-        model = AutoModelForSequenceClassification.from_pretrained(model_name, cache_dir=cache_dir)
-        
-        sentiment_pipeline = pipeline(
-            "sentiment-analysis",
-            model=model,
-            tokenizer=tokenizer,
-            device=0 if torch.cuda.is_available() else -1
-        )
-        
-        logger.info("Model loaded successfully")
-        return sentiment_pipeline
-    
+        analysis = DeepFace.analyze(image, actions=['emotion'], enforce_detection=False)
+        return analysis[0]['dominant_emotion'], analysis[0]['emotion']
     except Exception as e:
-        logger.error(f"Error initializing model: {str(e)}\n{traceback.format_exc()}")
-        st.error(f"An error occurred while loading the model: {str(e)}")
-        return None
+        return "Error", {}
 
-def analyze_with_nltk(text):
-    return sia.polarity_scores(text)
-
-def analyze_with_flair(text):
-    sentence = Sentence(text)
-    flair_classifier.predict(sentence)
-    return sentence.labels[0].to_dict()
-
-def split_text(text):
-    return re.split(r'[.,!?;:]', text)
-
-def detect_sentiments(sentences, sentiment_pipeline, method="transformer"):
-    sentiments = []
-    confidence_scores = []
-    report = ""
+def classify_objects(image):
+    model = models.resnet50(pretrained=True)
+    model.eval()
+    transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ])
     
-    for text in sentences:
-        if method == "transformer":
-            result = sentiment_pipeline(text)[0]
-            sentiment = result['label']
-            confidence = result['score']
-        elif method == "nltk":
-            result = analyze_with_nltk(text)
-            sentiment = max(result, key=result.get)  # Pick strongest sentiment
-            confidence = result[sentiment]
-        elif method == "flair":
-            result = analyze_with_flair(text)
-            sentiment = result['value']
-            confidence = result['confidence']
-        
-        sentiments.append(sentiment)
-        confidence_scores.append(confidence)
-        
-        report += f"**Segment:** {text.strip()}\n"
-        report += f"Sentiment: {sentiment} (Confidence: {confidence:.2f})\n\n"
-        report += "---\n"
+    image = transform(image).unsqueeze(0)
+    with torch.no_grad():
+        outputs = model(image)
     
-    df = pd.DataFrame({"Sentiment": sentiments, "Confidence": confidence_scores})
-    fig, ax = plt.subplots()
-    sns.countplot(data=df, x="Sentiment", palette="coolwarm", ax=ax)
-    plt.xticks(rotation=45)
-    st.pyplot(fig)
-    
-    return report
+    _, predicted = torch.max(outputs, 1)
+    class_id = str(predicted.item())
+    return imagenet_classes[class_id]
 
 def run():
-    logger = setup_logging()
-    st.header("📖 Text-Based Sentiment Analysis")
+    st.title("🖼️ Image-Based Sentiment & Object Analysis")
+    uploaded_file = st.file_uploader("Upload an Image", type=["jpg", "png", "jpeg"])
     
-    model_options = {
-        "DistilBERT (Fast)": "distilbert-base-uncased-finetuned-sst-2-english",
-        "BERT": "nlptown/bert-base-multilingual-uncased-sentiment",
-        "RoBERTa": "cardiffnlp/twitter-roberta-base-sentiment"
-    }
-    
-    analysis_methods = {"Transformer Model": "transformer", "NLTK VADER": "nltk", "Flair": "flair"}
-    selected_method = st.selectbox("Choose analysis method:", list(analysis_methods.keys()))
-    
-    sentiment_pipeline = None
-    if selected_method == "Transformer Model":
-        selected_model = st.selectbox("Choose a sentiment analysis model:", list(model_options.keys()))
-        sentiment_pipeline = initialize_model(model_options[selected_model], logger, os.path.join(os.path.expanduser("~"), ".cache", "huggingface"))
-    
-    user_input = st.text_area("Enter text for sentiment analysis:")
-    
-    if st.button("Analyze"):
-        if user_input:
-            sentences = [s.strip() for s in split_text(user_input) if s.strip()]
-            report = detect_sentiments(sentences, sentiment_pipeline, method=analysis_methods[selected_method])
-            
-            pdf_data = generate_pdf(report)
-            st.download_button("Download Analysis as PDF", pdf_data, "analysis.pdf", "application/pdf")
+    if uploaded_file:
+        image = Image.open(uploaded_file)
+        image_cv2 = np.array(image.convert('RGB'))
+        image_cv2 = cv2.cvtColor(image_cv2, cv2.COLOR_RGB2BGR)
+        
+        st.image(image, caption="Uploaded Image", use_column_width=True)
+        
+        st.subheader("Processing Image...")
+        
+        faces = detect_faces(image_cv2)
+        dominant_emotion, emotions = analyze_facial_expression(image_cv2)
+        object_category = classify_objects(image)
+        
+        st.subheader("Analysis Results:")
+        
+        if dominant_emotion != "Error":
+            confidence = emotions.get(dominant_emotion, 0) * 100
+            st.write(f"**Detected Emotion:** {dominant_emotion.capitalize()} 😃 (Confidence: {confidence:.2f}%)")
+        else:
+            st.write("**Detected Emotion:** No face detected.")
+        
+        st.write(f"**Detected Object:** {object_category[1]} 🏷️ (Class ID: {object_category[0]})")
+        
+        if len(faces) > 0:
+            for (x, y, w, h) in faces:
+                cv2.rectangle(image_cv2, (x, y), (x+w, y+h), (255, 0, 0), 2)
+            st.image(image_cv2, caption="Detected Faces", use_column_width=True)
+        else:
+            st.write("No faces detected.")
 
 if __name__ == "__main__":
     run()
