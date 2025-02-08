@@ -1,0 +1,18 @@
+# Ignore data folder
+data/
+_pycache_/
+__pycache__/
+# Ignore 'cache' and its subfolders
+cache/
+
+# Ignore all 'node_modules' folders (anywhere in project)
+**/node_modules/
+
+# Ignore all 'logs' folders but keep important.log
+logs/
+!logs/important.log
+
+# Ignore temporary files
+*.tmp
+*.log
+
